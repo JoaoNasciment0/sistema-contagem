@@ -1,5 +1,6 @@
-flask
-torch
-pillow
-flask-socketio
+Flask
 gunicorn
+torch
+numpy
+opencv-python
+Pillow
