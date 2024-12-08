@@ -1,8 +1,11 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, Response, jsonify
 import torch
 from PIL import Image, ImageDraw
+import base64
+import numpy as np
+import cv2
 
 # Inicializar o Flask
 app = Flask(__name__)
@@ -41,59 +44,96 @@ init_db()
 def index():
     return render_template('index.html')
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    try:
-        # Verificar se um arquivo foi enviado
-        if 'file' not in request.files:
-            return redirect(request.url)
+# Função para gerar o feed de vídeo
+def generate_video_feed():
+    # Abrir a câmera
+    cap = cv2.VideoCapture(0)
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Converter para RGB (OpenCV usa BGR por padrão)
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(img)
 
-        file = request.files['file']
-        if file.filename == '':
-            return redirect(request.url)
-
-        # Salvar a imagem enviada
-        img_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-        file.save(img_path)
-
-        # Carregar a imagem e realizar a predição
-        img = Image.open(img_path)
-        results = model([img])
+        # Realizar a predição
+        results = model([pil_img])
         detections = results.xyxy[0].cpu().numpy()  # Obter os resultados
         filtered_detections = [d for d in detections if d[4] >= 0.85]  # Filtrar predições com confiança >= 0.85
 
-        # Adicionar caixas e rótulos na imagem
-        img_with_boxes = img.copy()
-        draw = ImageDraw.Draw(img_with_boxes)
+        # Desenhar as caixas na imagem
         for det in filtered_detections:
             x1, y1, x2, y2, conf, cls = det
-            label = f"{results.names[int(cls)]} {conf:.2f}"
-            draw.rectangle([x1, y1, x2, y2], outline="blue", width=2)
-            draw.text((x1, y1), label, fill="blue")
+            try:
+                label = f"{results.names[int(cls)]} {conf:.2f}"
+            except IndexError:
+                label = f"Classe {int(cls)} {conf:.2f}"  # Se a classe não for encontrada, apenas exibe o número da classe
 
-        # Salvar a imagem processada
-        img_output_path = os.path.join(app.config['OUTPUT_FOLDER'], 'output.jpg')
-        img_with_boxes.save(img_output_path)
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(frame, label, (int(x1), int(y1)-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Converter para JPEG e enviar via Response
+        ret, jpeg = cv2.imencode('.jpg', frame)
+        if not ret:
+            continue
+        frame = jpeg.tobytes()
+        
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n\r\n')
 
-        # Contar o número de big bags detectados
-        bigbag_count = int(sum(det[5] == 0 for det in filtered_detections))  # Garantir que seja um número inteiro
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_video_feed(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-        # Salvar os dados no banco de dados
-        conn = sqlite3.connect('database.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO detections (image_name, image_path, count)
-            VALUES (?, ?, ?)
-        ''', (file.filename, img_path, bigbag_count))
-        conn.commit()
-        conn.close()
+@app.route('/predict_camera', methods=['POST'])
+def predict_camera():
+    try:
+        # Receber a imagem em base64
+        data = request.get_json()
+        image_data = data['image']
+        
+        # Converter base64 para imagem
+        img_data = base64.b64decode(image_data.split(',')[1])
+        np_arr = np.frombuffer(img_data, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-        # Retornar os resultados ao usuário
-        return render_template('result.html', img_url=img_output_path, bigbag_count=bigbag_count)
+        # Converter para RGB (OpenCV usa BGR por padrão)
+        pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+        # Realizar a predição
+        results = model([pil_img])
+        detections = results.xyxy[0].cpu().numpy()  # Obter os resultados
+        filtered_detections = [d for d in detections if d[4] >= 0.85]  # Filtrar predições com confiança >= 0.85
+
+        # Contar e coletar as coordenadas dos BigBags detectados (classe 0, BigBag)
+        bigbags = []
+        bigbag_count = 0
+        for det in filtered_detections:
+            cls = int(det[5])
+            if cls == 0:  # Classe 0 é BigBag
+                bigbag_count += 1
+                # Extrair as coordenadas dos BigBags detectados
+                x1, y1, x2, y2, _, _ = det
+                bigbags.append({
+                    "x": int(x1),
+                    "y": int(y1),
+                    "width": int(x2 - x1),
+                    "height": int(y2 - y1)
+                })
+        
+        # Retornar a contagem e as coordenadas dos BigBags
+        return jsonify({
+            "status": "success", 
+            "count": bigbag_count, 
+            "bigbags": bigbags  # Incluindo as coordenadas dos BigBags
+        })
 
     except Exception as e:
         print(f"Erro durante a predição: {e}")
-        return "Ocorreu um erro ao processar a imagem. Verifique o console para mais detalhes."
+        return jsonify({"status": "error", "message": str(e)})
+
 
 @app.route('/history')
 def history():

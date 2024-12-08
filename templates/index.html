@@ -1,121 +1,215 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema de Contagem de Big Bags</title>
+    <title>Detecção de BigBags em Tempo Real</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        /* Estilo global da página */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f3f4f6;
-            color: #333;
-            line-height: 1.6;
-        }
-        header {
-            background: linear-gradient(90deg, #4b79a1, #283e51);
-            color: white;
-            padding: 20px 0;
-            text-align: center;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        header h1 {
-            font-size: 2.5rem;
+            background-color: #f9f9f9;
             margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #333;
         }
-        main {
+
+        /* Título centralizado */
+        h1 {
+            font-size: 2.5rem;
+            color: #333;
+            margin: 20px 0;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        /* Container do vídeo e canvas */
+        .video-container {
+            position: relative;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fff;
+        }
+
+        #video {
+            width: 640px;
+            height: 480px;
+            border-radius: 12px;
+            object-fit: cover;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            border-radius: 12px;
+        }
+
+        /* Seção de contagem */
+        .count-container {
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: calc(100vh - 120px);
-            padding: 20px;
-        }
-        .upload-container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
-            padding: 40px;
+            flex-direction: column;
             text-align: center;
-            max-width: 500px;
-            width: 100%;
-            animation: fadeIn 1s ease;
         }
-        .upload-container h2 {
-            font-size: 1.8rem;
-            color: #4b79a1;
-            margin-bottom: 20px;
+
+        .status {
+            font-size: 1.2rem;
+            color: #444;
+            margin-bottom: 5px;
         }
-        input[type="file"] {
-            margin: 20px 0;
-            padding: 10px;
-            font-size: 1rem;
-            border: 2px dashed #4b79a1;
+
+        .count {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #34C759;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background-color: #f2f2f2;
             border-radius: 8px;
-            width: 100%;
-            cursor: pointer;
-            transition: all 0.3s;
+            box-shadow: 0 3px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
         }
-        input[type="file"]:hover {
-            border-color: #283e51;
-            background-color: #f1f1f1;
+
+        .count.highlight {
+            background-color: #FF6347;
+            color: #fff;
+            box-shadow: 0 5px 20px rgba(255, 99, 71, 0.5);
+            transform: scale(1.1);
         }
-        button {
-            background: linear-gradient(90deg, #4b79a1, #283e51);
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: background 0.3s ease, transform 0.2s;
+
+        /* Estilo do quadrado de destaque */
+        .highlight-box {
+            position: absolute;
+            border: 2px solid rgba(0, 255, 0, 0.6); /* Borda fina */
+            background-color: transparent; /* Sem preenchimento */
+            border-radius: 6px;
+            box-shadow: 0 0 12px rgba(0, 255, 0, 0.6);
+            transition: all 0.3s ease;
         }
-        button:hover {
-            background: linear-gradient(90deg, #283e51, #4b79a1);
-            transform: scale(1.05);
+
+        .highlight-box:hover {
+            border-color: #FFD700;
+            box-shadow: 0 0 18px rgba(255, 215, 0, 0.8);
         }
-        footer {
-            background: #283e51;
-            color: white;
-            text-align: center;
-            padding: 15px 0;
-            font-size: 0.9rem;
-            position: relative;
-            bottom: 0;
-            width: 100%;
+
+        /* Animação de texto e borda */
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.9; }
+            100% { transform: scale(1); opacity: 1; }
         }
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+
+        .pulse {
+            animation: pulse 1s ease-in-out infinite;
         }
+
     </style>
 </head>
 <body>
-    <header>
-        <h1>Sistema de Contagem de Big Bags</h1>
-    </header>
-    <main>
-        <div class="upload-container">
-            <h2>Detectar Big Bags</h2>
-            <p>Carregue uma imagem para processar a contagem automática de Big Bags no estoque.</p>
-            <form action="/predict" method="post" enctype="multipart/form-data">
-                <input type="file" name="file" accept="image/*" required>
-                <br>
-                <button type="submit">Enviar Imagem</button>
-            </form>
-        </div>
-    </main>
-    <footer>
-        &copy; 2024 Sistema de Contagem de Estoque | Desenvolvido por Você
-    </footer>
+
+    <!-- Título da aplicação -->
+    <h1>Detecção de BigBags em Tempo Real</h1>
+    
+    <!-- Container do vídeo e canvas -->
+    <div class="video-container">
+        <video id="video" autoplay></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <!-- Contagem de BigBags -->
+    <div class="count-container">
+        <div class="status">BigBags detectados:</div>
+        <div id="bigbag-count" class="count">0</div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const bigbagCount = document.getElementById('bigbag-count');
+
+        // Configura a câmera
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(error => {
+                console.error("Erro ao acessar a câmera:", error);
+            });
+
+        // Função para capturar quadro e desenhar quadrados
+        function fetchBigbagCount() {
+            // Ajusta o canvas para as dimensões do vídeo
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            const tempCanvas = document.createElement('canvas');
+            const tempContext = tempCanvas.getContext('2d');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+
+            // Captura o quadro atual do vídeo
+            tempContext.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+
+            // Converte o quadro para base64
+            const base64Image = tempCanvas.toDataURL('image/jpeg');
+
+            // Envia para o backend
+            fetch('/predict_camera', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: base64Image })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Atualiza a contagem
+                    bigbagCount.textContent = data.count;
+
+                    // Aplica a animação de destaque na contagem
+                    bigbagCount.classList.add('highlight');
+                    setTimeout(() => bigbagCount.classList.remove('highlight'), 1000);
+
+                    // Limpa o canvas e desenha os quadrados
+                    context.clearRect(0, 0, canvas.width, canvas.height);
+                    data.bigbags.forEach((bigbag, index) => {
+                        const x = bigbag.x;
+                        const y = bigbag.y;
+                        const width = bigbag.width;
+                        const height = bigbag.height;
+
+                        // Desenhando a borda fina ao redor do BigBag
+                        context.strokeStyle = '#FFD700'; // Cor dourada para a borda
+                        context.lineWidth = 2; // Largura da borda
+                        context.strokeRect(x, y, width, height);
+
+                        // Adicionando contagem ao lado do quadrado
+                        context.font = '16px Arial';
+                        context.fillStyle = '#FFD700';
+                        context.fillText(`BigBag ${index + 1}`, x + width + 10, y + height / 2);
+                    });
+                } else {
+                    console.error("Erro na detecção:", data.message);
+                }
+            })
+            .catch(error => {
+                console.error("Erro na contagem de BigBags:", error);
+            });
+        }
+
+        // Atualiza o feed a cada 1 segundo (1000 ms)
+        setInterval(fetchBigbagCount, 1000);
+    </script>
+
 </body>
 </html>
