@@ -2,3 +2,4 @@ flask
 torch
 pillow
 flask-socketio
+gunicorn
